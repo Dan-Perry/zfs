@@ -103,6 +103,7 @@ extern "C" {
 #define	SA_ZPL_PAD(z)		z->z_attr_table[ZPL_PAD]
 #define	SA_ZPL_PROJID(z)	z->z_attr_table[ZPL_PROJID]
 #define	SA_ZPL_SEQ(z)		z->z_attr_table[ZPL_SEQ]
+#define	SA_ZPL_NAME(z)		z->z_attr_table[ZPL_NAME]
 
 /*
  * may_grow for a dmu_tx_hold_sa() that may persist z_seq: the SA layout
@@ -301,6 +302,9 @@ extern dev_t	zfs_cmpldev(uint64_t);
 extern int	zfs_get_stats(objset_t *os, nvlist_t *nv);
 extern boolean_t zfs_get_vfs_flag_unmounted(objset_t *os);
 extern void	zfs_znode_dmu_fini(znode_t *);
+extern size_t	zfs_name_attr_len(zfsvfs_t *, znode_t *, const char *);
+extern void	zfs_name_attr_set(znode_t *, const char *, size_t,
+    dmu_tx_t *);
 
 extern void zfs_log_create(zilog_t *zilog, dmu_tx_t *tx, uint64_t txtype,
     znode_t *dzp, znode_t *zp, const char *name, vsecattr_t *,

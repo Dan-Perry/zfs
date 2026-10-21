@@ -1382,6 +1382,33 @@ property is set with
 .Sy mountpoint
 property is updated but dataset is not mounted or unmounted and remains
 as it was before.
+.It Sy nameattr Ns = Ns Sy on Ns | Ns Sy off
+Controls whether the directory entry name of each file is also stored in
+the file's system attributes when it is created, linked or renamed.
+The stored name allows the file system to resolve a file back to its
+name in a directory in constant time, which is needed to build the path
+of a file from the file itself.
+Without it, that lookup scans the directory and its cost grows with the
+number of entries in the directory.
+The stored name is only ever used after confirming it still refers to
+the file in the directory in question, so it may safely become stale
+after a hard link is removed, or when the dataset is modified by a ZFS
+implementation that does not maintain it.
+Lookups then fall back to scanning the directory.
+.Pp
+Only files created, linked or renamed while the property is
+.Sy on
+carry a stored name.
+Names that do not fit in 255 bytes are never stored.
+The name occupies additional space in the dnode bonus buffer and, on
+pools using 512-byte dnodes, long names or files that also carry ACLs or
+system-attribute extended attributes may be pushed into a spill block,
+which adds a second read to operations on those files.
+Setting
+.Sy dnodesize Ns = Ns Sy auto
+is recommended when enabling this property.
+The default value is
+.Sy off .
 .It Sy nbmand Ns = Ns Sy on Ns | Ns Sy off
 Controls whether the file system should be mounted with
 .Sy nbmand

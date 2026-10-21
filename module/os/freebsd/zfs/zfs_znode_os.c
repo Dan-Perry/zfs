@@ -285,7 +285,8 @@ zfs_create_share_dir(zfsvfs_t *zfsvfs, dmu_tx_t *tx)
 
 	VERIFY0(zfs_acl_ids_create(sharezp, IS_ROOT_NODE, &vattr,
 	    kcred, NULL, &acl_ids));
-	zfs_mknode(sharezp, &vattr, tx, kcred, IS_ROOT_NODE, &zp, &acl_ids);
+	zfs_mknode(sharezp, &vattr, tx, kcred, IS_ROOT_NODE, &zp, &acl_ids,
+	    NULL);
 	ASSERT3P(zp, ==, sharezp);
 	POINTER_INVALIDATE(&sharezp->z_zfsvfs);
 	error = zap_add(zfsvfs->z_os, MASTER_NODE_OBJ,
@@ -553,13 +554,15 @@ static zfs_acl_phys_t acl_phys;
  *		bonuslen - length of bonus buffer
  *		setaclp  - File/Dir initial ACL
  *		fuidp	 - Tracks fuid allocation.
+ *		name	- directory entry name to store as ZPL_NAME,
+ *			  or NULL to store none
  *
  *	OUT:	zpp	- allocated znode
  *
  */
 void
 zfs_mknode(znode_t *dzp, vattr_t *vap, dmu_tx_t *tx, cred_t *cr,
-    uint_t flag, znode_t **zpp, zfs_acl_ids_t *acl_ids)
+    uint_t flag, znode_t **zpp, zfs_acl_ids_t *acl_ids, const char *name)
 {
 	uint64_t	crtime[2], atime[2], mtime[2], ctime[2];
 	uint64_t	mode, size, links, parent, pflags;
@@ -786,6 +789,10 @@ zfs_mknode(znode_t *dzp, vattr_t *vap, dmu_tx_t *tx, cred_t *cr,
 		SA_ADD_BULK_ATTR(sa_attrs, cnt, SA_ZPL_RDEV(zfsvfs),
 		    NULL, &rdev, 8);
 
+	}
+	if (obj_type == DMU_OT_SA && name != NULL) {
+		SA_ADD_BULK_ATTR(sa_attrs, cnt, SA_ZPL_NAME(zfsvfs),
+		    NULL, __DECONST(void *, name), strlen(name) + 1);
 	}
 	if (obj_type == DMU_OT_ZNODE) {
 		SA_ADD_BULK_ATTR(sa_attrs, cnt, SA_ZPL_FLAGS(zfsvfs),
@@ -1864,7 +1871,7 @@ zfs_create_fs(objset_t *os, cred_t *cr, nvlist_t *zplprops, dmu_tx_t *tx)
 	rootzp->z_zfsvfs = zfsvfs;
 	VERIFY0(zfs_acl_ids_create(rootzp, IS_ROOT_NODE, &vattr,
 	    cr, NULL, &acl_ids));
-	zfs_mknode(rootzp, &vattr, tx, cr, IS_ROOT_NODE, &zp, &acl_ids);
+	zfs_mknode(rootzp, &vattr, tx, cr, IS_ROOT_NODE, &zp, &acl_ids, NULL);
 	ASSERT3P(zp, ==, rootzp);
 	error = zap_add(os, moid, ZFS_ROOT_OBJ, 8, 1, &rootzp->z_id, tx);
 	ASSERT0(error);
@@ -1904,8 +1911,9 @@ zfs_znode_parent_and_name(znode_t *zp, znode_t **dzpp, char *buf,
     uint64_t buflen)
 {
 	zfsvfs_t *zfsvfs = zp->z_zfsvfs;
-	uint64_t parent;
+	uint64_t parent, zoid;
 	int is_xattrdir;
+	int namelen;
 	int err;
 
 	/* Extended attributes should not be visible as regular files. */
@@ -1922,8 +1930,28 @@ zfs_znode_parent_and_name(znode_t *zp, znode_t **dzpp, char *buf,
 	if (parent == zp->z_id)
 		return (SET_ERROR(EINVAL));
 
-	err = zap_value_search(zfsvfs->z_os, parent, zp->z_id,
-	    ZFS_DIRENT_OBJ(-1ULL), buf, buflen);
+	/*
+	 * The cached ZPL_NAME may be stale, so it is only returned
+	 * after the directory ZAP confirms it still names zp.  The on-disk
+	 * size and NUL termination are checked because sa_lookup() silently
+	 * truncates to the buffer.
+	 */
+	err = SET_ERROR(ENOENT);
+	if (sa_size(zp->z_sa_hdl, SA_ZPL_NAME(zfsvfs), &namelen) == 0 &&
+	    namelen > 0 && (uint64_t)namelen <= buflen &&
+	    sa_lookup(zp->z_sa_hdl, SA_ZPL_NAME(zfsvfs), buf,
+	    namelen) == 0 && buf[namelen - 1] == '\0' &&
+	    zap_lookup(zfsvfs->z_os, parent, buf, 8, 1, &zoid) == 0 &&
+	    ZFS_DIRENT_OBJ(zoid) == zp->z_id)
+		err = 0;
+
+	dataset_kstats_update_namelookup_kstat(&zfsvfs->z_kstat, 1);
+	if (err != 0) {
+		dataset_kstats_update_namelookup_miss_kstat(&zfsvfs->z_kstat,
+		    1);
+		err = zap_value_search(zfsvfs->z_os, parent, zp->z_id,
+		    ZFS_DIRENT_OBJ(-1ULL), buf, buflen);
+	}
 	if (err != 0)
 		return (err);
 	err = zfs_zget(zfsvfs, parent, dzpp);

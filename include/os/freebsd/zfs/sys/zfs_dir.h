@@ -45,7 +45,7 @@ extern int zfs_link_destroy(znode_t *, const char *, znode_t *, dmu_tx_t *, int,
     boolean_t *);
 extern int zfs_dirlook(znode_t *, const char *name, znode_t **);
 extern void zfs_mknode(znode_t *, vattr_t *, dmu_tx_t *, cred_t *,
-    uint_t, znode_t **, zfs_acl_ids_t *);
+    uint_t, znode_t **, zfs_acl_ids_t *, const char *);
 extern void zfs_rmnode(znode_t *);
 extern boolean_t zfs_dirempty(znode_t *);
 extern void zfs_unlinked_add(znode_t *, dmu_tx_t *);

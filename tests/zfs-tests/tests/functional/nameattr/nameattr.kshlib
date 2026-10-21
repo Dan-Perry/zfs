@@ -1,0 +1,97 @@
+# SPDX-License-Identifier: CDDL-1.0
+#
+# CDDL HEADER START
+#
+# The contents of this file are subject to the terms of the
+# Common Development and Distribution License (the "License").
+# You may not use this file except in compliance with the License.
+#
+# You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+# or https://opensource.org/licenses/CDDL-1.0.
+# See the License for the specific language governing permissions
+# and limitations under the License.
+#
+# When distributing Covered Code, include this CDDL HEADER in each
+# file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+# If applicable, add the following below this CDDL HEADER, with the
+# fields enclosed by brackets "[]" replaced with your own identifying
+# information: Portions Copyright [yyyy] [name of copyright owner]
+#
+# CDDL HEADER END
+#
+
+#
+# Copyright (c) 2026, Amazon.com, Inc. or its affiliates.
+#
+
+. $STF_SUITE/include/libtest.shlib
+
+#
+# Dump object $obj in $dataset with zdb and print the value of the given
+# per-object field (e.g. "name" or "path").  Prints an empty string if
+# the field is absent.  Five -d are needed for zdb to print the path.
+#
+# zdb reads the on-disk state, so the pool is synced first.
+#
+function zdb_obj_field # dataset obj field
+{
+	typeset ds=$1 obj=$2 field=$3
+
+	sync_pool "${ds%%/*}" >/dev/null
+	zdb -ddddd "$ds" "$obj" | awk -F'\t' -v f="$field" \
+	    '$2 == f { print $3; exit }'
+}
+
+#
+# Same as zdb_obj_field for the object behind $path.
+#
+function zdb_znode_field # dataset path field
+{
+	typeset ds=$1 path=$2 field=$3
+
+	zdb_obj_field "$ds" "$(get_objnum "$path")" "$field"
+}
+
+#
+# Assert the object at $path carries ZPL_NAME equal to $expected.
+#
+function verify_name # dataset path expected
+{
+	typeset ds=$1 path=$2 expected=$3
+	typeset actual
+
+	actual=$(zdb_znode_field "$ds" "$path" name)
+	[[ "$actual" == "$expected" ]] ||
+	    log_fail "$path: name is '$actual', expected '$expected'"
+	log_note "$path: name='$actual'"
+}
+
+#
+# Assert the object at $path carries no ZPL_NAME at all.
+#
+function verify_no_name # dataset path
+{
+	typeset ds=$1 path=$2
+	typeset actual
+
+	actual=$(zdb_znode_field "$ds" "$path" name)
+	[[ -z "$actual" ]] ||
+	    log_fail "$path: unexpected name '$actual'"
+	log_note "$path: no name (expected)"
+}
+
+#
+# Assert that zdb's own ZAP-derived path for the object matches the
+# path we know it by.  zdb prints the path relative to the dataset root.
+#
+function verify_zdb_path # dataset path
+{
+	typeset ds=$1 path=$2
+	typeset mntpnt rel actual
+
+	mntpnt=$(get_prop mountpoint "$ds")
+	rel=${path#$mntpnt}
+	actual=$(zdb_znode_field "$ds" "$path" path)
+	[[ "$actual" == "$rel" ]] ||
+	    log_fail "$path: zdb path is '$actual', expected '$rel'"
+}

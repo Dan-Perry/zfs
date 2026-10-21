@@ -1377,6 +1377,44 @@ zfs_get_direct_alignment(znode_t *zp, uint64_t *alignp)
 	return (0);
 }
 
+/*
+ * Return the size of the ZPL_NAME attribute for an entry called
+ * 'name' in 'dzp', including the NUL, or 0 if none should be written.
+ * The nameattr property can change in syncing context at any time, so
+ * callers evaluate this once before creating the transaction and use the
+ * result for both the tx holds and the write.
+ */
+size_t
+zfs_name_attr_len(zfsvfs_t *zfsvfs, znode_t *dzp, const char *name)
+{
+	size_t len;
+
+	if (!zfsvfs->z_nameattr)
+		return (0);
+	if (dzp->z_pflags & ZFS_XATTR)
+		return (0);
+	len = strlen(name) + 1;
+	if (len > MAXNAMELEN)
+		return (0);
+	return (len);
+}
+
+/*
+ * Store 'name' as the ZPL_NAME of an existing znode.  The caller
+ * must have taken the SA hold with may_grow set.
+ */
+void
+zfs_name_attr_set(znode_t *zp, const char *name, size_t namelen,
+    dmu_tx_t *tx)
+{
+	zfsvfs_t *zfsvfs = ZTOZSB(zp);
+
+	if (!zp->z_is_sa)
+		return;
+	VERIFY0(sa_update(zp->z_sa_hdl, SA_ZPL_NAME(zfsvfs),
+	    (void *)(uintptr_t)name, namelen, tx));
+}
+
 #ifdef ZFS_DEBUG
 static int zil_fault_io = 0;
 #endif

@@ -544,9 +544,10 @@ zfs_lookup(znode_t *zdp, char *nm, znode_t **zpp, int flags, cred_t *cr,
 }
 
 /*
- * Perform a linear search in directory for the name of specific inode.
- * Note we don't pass in the buffer size of name because it's hardcoded to
- * NAME_MAX+1(256) in Linux.
+ * Find the name of a specific inode in a directory.  The cached
+ * ZPL_NAME is used when it is still valid, otherwise the directory
+ * is scanned.  The size of name is not passed in because it is hardcoded
+ * to NAME_MAX+1 (256) in Linux.
  *
  *	IN:	dzp	- znode of directory to search.
  *		zp	- znode of the target
@@ -559,6 +560,8 @@ int
 zfs_get_name(znode_t *dzp, char *name, znode_t *zp)
 {
 	zfsvfs_t *zfsvfs = ZTOZSB(dzp);
+	uint64_t zoid;
+	int namelen;
 	int error = 0;
 
 	if ((error = zfs_enter_verify_zp(zfsvfs, dzp, FTAG)) != 0)
@@ -575,10 +578,28 @@ zfs_get_name(znode_t *dzp, char *name, znode_t *zp)
 		return (ENOENT);
 	}
 
-	/* buffer len is hardcoded to 256 in Linux kernel */
+	/*
+	 * The cached ZPL_NAME may be stale, so it is only returned
+	 * after the directory ZAP confirms it still names zp.  The on-disk
+	 * size and NUL termination are checked because sa_lookup() silently
+	 * truncates to the buffer.
+	 */
+	if (sa_size(zp->z_sa_hdl, SA_ZPL_NAME(zfsvfs), &namelen) == 0 &&
+	    namelen > 0 && namelen <= MAXNAMELEN &&
+	    sa_lookup(zp->z_sa_hdl, SA_ZPL_NAME(zfsvfs), name,
+	    namelen) == 0 && name[namelen - 1] == '\0' &&
+	    zap_lookup(zfsvfs->z_os, dzp->z_id, name, 8, 1, &zoid) == 0 &&
+	    ZFS_DIRENT_OBJ(zoid) == zp->z_id) {
+		dataset_kstats_update_namelookup_kstat(&zfsvfs->z_kstat, 1);
+		zfs_exit(zfsvfs, FTAG);
+		return (0);
+	}
+
 	error = zap_value_search(zfsvfs->z_os, dzp->z_id, zp->z_id,
 	    ZFS_DIRENT_OBJ(-1ULL), name, ZAP_MAXNAMELEN);
 
+	dataset_kstats_update_namelookup_kstat(&zfsvfs->z_kstat, 1);
+	dataset_kstats_update_namelookup_miss_kstat(&zfsvfs->z_kstat, 1);
 	zfs_exit(zfsvfs, FTAG);
 	return (error);
 }
@@ -623,6 +644,7 @@ zfs_create_idmap(znode_t *dzp, char *name, vattr_t *vap, int excl,
 	zfs_acl_ids_t   acl_ids;
 	boolean_t	fuid_dirtied;
 	boolean_t	have_acl = B_FALSE;
+	size_t		namelen;
 	boolean_t	waited = B_FALSE;
 	boolean_t	skip_acl = (flag & ATTR_NOACLCHECK) ? B_TRUE : B_FALSE;
 
@@ -728,10 +750,11 @@ top:
 			goto out;
 		}
 
+		namelen = zfs_name_attr_len(zfsvfs, dzp, dl->dl_name);
 		tx = dmu_tx_create(os);
 
 		dmu_tx_hold_sa_create(tx, acl_ids.z_aclp->z_acl_bytes +
-		    ZFS_SA_BASE_ATTR_SIZE);
+		    ZFS_SA_BASE_ATTR_SIZE + namelen);
 
 		fuid_dirtied = zfsvfs->z_fuid_dirty;
 		if (fuid_dirtied)
@@ -759,7 +782,8 @@ top:
 			zfs_exit(zfsvfs, FTAG);
 			return (error);
 		}
-		zfs_mknode(dzp, vap, tx, cr, 0, &zp, &acl_ids);
+		zfs_mknode(dzp, vap, tx, cr, 0, &zp, &acl_ids,
+		    namelen != 0 ? dl->dl_name : NULL);
 
 		error = zfs_link_create(dl, zp, tx, ZNEW);
 		if (error != 0) {
@@ -955,7 +979,7 @@ top:
 		zfs_exit(zfsvfs, FTAG);
 		return (error);
 	}
-	zfs_mknode(dzp, vap, tx, cr, IS_TMPFILE, &zp, &acl_ids);
+	zfs_mknode(dzp, vap, tx, cr, IS_TMPFILE, &zp, &acl_ids, NULL);
 
 	if (fuid_dirtied)
 		zfs_fuid_sync(zfsvfs, tx);
@@ -1265,6 +1289,7 @@ zfs_mkdir_idmap(znode_t *dzp, char *dirname, vattr_t *vap, znode_t **zpp,
 	gid_t		gid = crgetgid(cr);
 	zfs_acl_ids_t   acl_ids;
 	boolean_t	fuid_dirtied;
+	size_t		namelen;
 	boolean_t	waited = B_FALSE;
 
 	ASSERT(S_ISDIR(vap->va_mode));
@@ -1359,8 +1384,9 @@ top:
 		    acl_ids.z_aclp->z_acl_bytes);
 	}
 
+	namelen = zfs_name_attr_len(zfsvfs, dzp, dl->dl_name);
 	dmu_tx_hold_sa_create(tx, acl_ids.z_aclp->z_acl_bytes +
-	    ZFS_SA_BASE_ATTR_SIZE);
+	    ZFS_SA_BASE_ATTR_SIZE + namelen);
 
 	error = dmu_tx_assign(tx,
 	    (waited ? DMU_TX_NOTHROTTLE : 0) | DMU_TX_NOWAIT);
@@ -1381,7 +1407,8 @@ top:
 	/*
 	 * Create new node.
 	 */
-	zfs_mknode(dzp, vap, tx, cr, 0, &zp, &acl_ids);
+	zfs_mknode(dzp, vap, tx, cr, 0, &zp, &acl_ids,
+	    namelen != 0 ? dl->dl_name : NULL);
 
 	/*
 	 * Now put new name in parent dir.
@@ -2826,6 +2853,7 @@ zfs_rename_idmap(znode_t *sdzp, char *snm, znode_t *tdzp, char *tnm,
 	int		cmp, serr, terr;
 	int		error = 0;
 	int		zflg = 0;
+	size_t		snamelen, tnamelen;
 	boolean_t	waited = B_FALSE;
 	/* Needed for whiteout inode creation. */
 	boolean_t	fuid_dirtied;
@@ -3109,8 +3137,11 @@ top:
 		}
 	}
 
+	tnamelen = zfs_name_attr_len(zfsvfs, tdzp, tdl->dl_name);
+	snamelen = zfs_name_attr_len(zfsvfs, sdzp, sdl->dl_name);
 	tx = dmu_tx_create(zfsvfs->z_os);
-	dmu_tx_hold_sa(tx, szp->z_sa_hdl, ZFS_SEQ_MAY_GROW(szp));
+	dmu_tx_hold_sa(tx, szp->z_sa_hdl,
+	    tnamelen != 0 || ZFS_SEQ_MAY_GROW(szp));
 	dmu_tx_hold_sa(tx, sdzp->z_sa_hdl, ZFS_SEQ_MAY_GROW(sdzp));
 	dmu_tx_hold_zap(tx, sdzp->z_id,
 	    (rflags & RENAME_EXCHANGE) ? TRUE : FALSE, snm);
@@ -3120,12 +3151,14 @@ top:
 		zfs_sa_upgrade_txholds(tx, tdzp);
 	}
 	if (tzp) {
-		dmu_tx_hold_sa(tx, tzp->z_sa_hdl, ZFS_SEQ_MAY_GROW(tzp));
+		dmu_tx_hold_sa(tx, tzp->z_sa_hdl,
+		    ((rflags & RENAME_EXCHANGE) && snamelen != 0) ||
+		    ZFS_SEQ_MAY_GROW(tzp));
 		zfs_sa_upgrade_txholds(tx, tzp);
 	}
 	if (rflags & RENAME_WHITEOUT) {
 		dmu_tx_hold_sa_create(tx, acl_ids.z_aclp->z_acl_bytes +
-		    ZFS_SA_BASE_ATTR_SIZE);
+		    ZFS_SA_BASE_ATTR_SIZE + snamelen);
 
 		dmu_tx_hold_zap(tx, sdzp->z_id, TRUE, snm);
 		dmu_tx_hold_sa(tx, sdzp->z_sa_hdl, ZFS_SEQ_MAY_GROW(sdzp));
@@ -3222,6 +3255,8 @@ top:
 		ASSERT0P(tzp);
 		goto commit_link_tzp;
 	}
+	if (tnamelen != 0)
+		zfs_name_attr_set(szp, tdl->dl_name, tnamelen, tx);
 
 	switch (rflags & (RENAME_EXCHANGE | RENAME_WHITEOUT)) {
 	case RENAME_EXCHANGE:
@@ -3234,9 +3269,12 @@ top:
 		ASSERT0(error);
 		if (error)
 			goto commit_unlink_td_szp;
+		if (snamelen != 0)
+			zfs_name_attr_set(tzp, sdl->dl_name, snamelen, tx);
 		break;
 	case RENAME_WHITEOUT:
-		zfs_mknode(sdzp, wo_vap, tx, cr, 0, &wzp, &acl_ids);
+		zfs_mknode(sdzp, wo_vap, tx, cr, 0, &wzp, &acl_ids,
+		    snamelen != 0 ? sdl->dl_name : NULL);
 		error = zfs_link_create(sdl, wzp, tx, ZNEW);
 		if (error) {
 			zfs_znode_delete(wzp, tx);
@@ -3375,6 +3413,7 @@ zfs_symlink_idmap(znode_t *dzp, char *name, vattr_t *vap, char *link,
 	zfs_acl_ids_t	acl_ids;
 	boolean_t	fuid_dirtied;
 	uint64_t	txtype = TX_SYMLINK;
+	size_t		namelen;
 	boolean_t	waited = B_FALSE;
 
 	ASSERT(S_ISLNK(vap->va_mode));
@@ -3435,8 +3474,9 @@ top:
 	fuid_dirtied = zfsvfs->z_fuid_dirty;
 	dmu_tx_hold_write(tx, DMU_NEW_OBJECT, 0, MAX(1, len));
 	dmu_tx_hold_zap(tx, dzp->z_id, TRUE, name);
+	namelen = zfs_name_attr_len(zfsvfs, dzp, dl->dl_name);
 	dmu_tx_hold_sa_create(tx, acl_ids.z_aclp->z_acl_bytes +
-	    ZFS_SA_BASE_ATTR_SIZE + len);
+	    ZFS_SA_BASE_ATTR_SIZE + len + namelen);
 	dmu_tx_hold_sa(tx, dzp->z_sa_hdl, ZFS_SEQ_MAY_GROW(dzp));
 	if (!zfsvfs->z_use_sa && acl_ids.z_aclp->z_acl_bytes > ZFS_ACE_SPACE) {
 		dmu_tx_hold_write(tx, DMU_NEW_OBJECT, 0,
@@ -3464,7 +3504,8 @@ top:
 	 * Create a new object for the symlink.
 	 * for version 4 ZPL datasets the symlink will be an SA attribute
 	 */
-	zfs_mknode(dzp, vap, tx, cr, 0, &zp, &acl_ids);
+	zfs_mknode(dzp, vap, tx, cr, 0, &zp, &acl_ids,
+	    namelen != 0 ? dl->dl_name : NULL);
 
 	if (fuid_dirtied)
 		zfs_fuid_sync(zfsvfs, tx);
@@ -3589,6 +3630,7 @@ zfs_link(znode_t *tdzp, znode_t *szp, char *name, cred_t *cr,
 	int		zf = ZNEW;
 	uint64_t	parent;
 	uid_t		owner;
+	size_t		namelen;
 	boolean_t	waited = B_FALSE;
 	boolean_t	is_tmpfile = 0;
 	uint64_t	txg;
@@ -3694,8 +3736,10 @@ top:
 		return (error);
 	}
 
+	namelen = zfs_name_attr_len(zfsvfs, tdzp, dl->dl_name);
 	tx = dmu_tx_create(zfsvfs->z_os);
-	dmu_tx_hold_sa(tx, szp->z_sa_hdl, ZFS_SEQ_MAY_GROW(szp));
+	dmu_tx_hold_sa(tx, szp->z_sa_hdl,
+	    namelen != 0 || ZFS_SEQ_MAY_GROW(szp));
 	dmu_tx_hold_sa(tx, tdzp->z_sa_hdl, ZFS_SEQ_MAY_GROW(tdzp));
 	dmu_tx_hold_zap(tx, tdzp->z_id, TRUE, name);
 	if (is_tmpfile)
@@ -3724,6 +3768,8 @@ top:
 
 	if (error == 0) {
 		uint64_t txtype = TX_LINK;
+		if (namelen != 0)
+			zfs_name_attr_set(szp, dl->dl_name, namelen, tx);
 		/*
 		 * tmpfile is created to be in z_unlinkedobj, so remove it.
 		 * Also, we don't log in ZIL, because all previous file

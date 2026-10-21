@@ -354,6 +354,7 @@ nobase_dist_datadir_zfs_tests_tests_DATA += \
 	functional/mmp/mmp.kshlib \
 	functional/mv_files/mv_files.cfg \
 	functional/mv_files/mv_files_common.kshlib \
+	functional/nameattr/nameattr.kshlib \
 	functional/nopwrite/nopwrite.shlib \
 	functional/no_space/enospc.cfg \
 	functional/online_offline/online_offline.cfg \
@@ -1911,6 +1912,14 @@ nobase_dist_datadir_zfs_tests_tests_SCRIPTS += \
 	functional/mv_files/mv_files_002_pos.ksh \
 	functional/mv_files/random_creation.ksh \
 	functional/mv_files/setup.ksh \
+	functional/nameattr/cleanup.ksh \
+	functional/nameattr/nameattr_001_pos.ksh \
+	functional/nameattr/nameattr_002_pos.ksh \
+	functional/nameattr/nameattr_003_pos.ksh \
+	functional/nameattr/nameattr_004_pos.ksh \
+	functional/nameattr/nameattr_005_pos.ksh \
+	functional/nameattr/nameattr_006_pos.ksh \
+	functional/nameattr/setup.ksh \
 	functional/nestedfs/cleanup.ksh \
 	functional/nestedfs/nestedfs_001_pos.ksh \
 	functional/nestedfs/setup.ksh \

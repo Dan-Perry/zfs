@@ -4188,6 +4188,28 @@ dump_znode_symlink(sa_handle_t *hdl)
 		(void) printf("\ttarget	%s\n", linktarget);
 }
 
+/* Print the cached directory entry name, if present. */
+static void
+dump_znode_name(sa_handle_t *hdl)
+{
+	int sa_name_size = 0;
+	char name[MAXNAMELEN + 1];
+	int error;
+
+	error = sa_size(hdl, sa_attr_table[ZPL_NAME], &sa_name_size);
+	if (error || sa_name_size == 0)
+		return;
+	if (sa_name_size > MAXNAMELEN) {
+		(void) printf("\tname size %d is too large\n",
+		    sa_name_size);
+		return;
+	}
+	name[sa_name_size] = '\0';
+	if (sa_lookup(hdl, sa_attr_table[ZPL_NAME], name,
+	    sa_name_size) == 0)
+		(void) printf("\tname	%s\n", name);
+}
+
 static void
 dump_znode(objset_t *os, uint64_t object, void *data, size_t size)
 {
@@ -4264,6 +4286,7 @@ dump_znode(objset_t *os, uint64_t object, void *data, size_t size)
 	(void) printf("\tmode	%llo\n", (u_longlong_t)mode);
 	(void) printf("\tsize	%llu\n", (u_longlong_t)fsize);
 	(void) printf("\tparent	%llu\n", (u_longlong_t)parent);
+	dump_znode_name(hdl);
 	(void) printf("\tlinks	%llu\n", (u_longlong_t)links);
 	(void) printf("\tpflags	%llx\n", (u_longlong_t)pflags);
 	if (dmu_objset_projectquota_enabled(os) && (pflags & ZFS_PROJID)) {

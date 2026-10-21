@@ -1161,7 +1161,7 @@ zfs_make_xattrdir(znode_t *zp, vattr_t *vap, znode_t **xzpp, cred_t *cr)
 		dmu_tx_abort(tx);
 		return (error);
 	}
-	zfs_mknode(zp, vap, tx, cr, IS_XATTR, &xzp, &acl_ids);
+	zfs_mknode(zp, vap, tx, cr, IS_XATTR, &xzp, &acl_ids, NULL);
 
 	if (fuid_dirtied)
 		zfs_fuid_sync(zfsvfs, tx);

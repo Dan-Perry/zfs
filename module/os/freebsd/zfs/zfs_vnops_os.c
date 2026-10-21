@@ -1038,6 +1038,7 @@ zfs_create(znode_t *dzp, const char *name, vattr_t *vap, int excl, int mode,
 	gid_t		gid = crgetgid(cr);
 	uint64_t	projid = ZFS_DEFAULT_PROJID;
 	zfs_acl_ids_t   acl_ids;
+	size_t		namelen;
 	boolean_t	fuid_dirtied;
 	uint64_t	txtype;
 
@@ -1116,10 +1117,11 @@ zfs_create(znode_t *dzp, const char *name, vattr_t *vap, int excl, int mode,
 
 	getnewvnode_reserve();
 
+	namelen = zfs_name_attr_len(zfsvfs, dzp, name);
 	tx = dmu_tx_create(os);
 
 	dmu_tx_hold_sa_create(tx, acl_ids.z_aclp->z_acl_bytes +
-	    ZFS_SA_BASE_ATTR_SIZE);
+	    ZFS_SA_BASE_ATTR_SIZE + namelen);
 
 	fuid_dirtied = zfsvfs->z_fuid_dirty;
 	if (fuid_dirtied)
@@ -1139,7 +1141,8 @@ zfs_create(znode_t *dzp, const char *name, vattr_t *vap, int excl, int mode,
 		zfs_exit(zfsvfs, FTAG);
 		return (error);
 	}
-	zfs_mknode(dzp, vap, tx, cr, 0, &zp, &acl_ids);
+	zfs_mknode(dzp, vap, tx, cr, 0, &zp, &acl_ids,
+	    namelen != 0 ? name : NULL);
 
 	error = zfs_link_create(dzp, name, zp, tx, ZNEW);
 	if (error != 0) {
@@ -1403,6 +1406,7 @@ zfs_mkdir(znode_t *dzp, const char *dirname, vattr_t *vap, znode_t **zpp,
 	uid_t		uid = crgetuid(cr);
 	gid_t		gid = crgetgid(cr);
 	zfs_acl_ids_t   acl_ids;
+	size_t		namelen;
 	boolean_t	fuid_dirtied;
 
 	ASSERT3U(vap->va_type, ==, VDIR);
@@ -1492,8 +1496,9 @@ zfs_mkdir(znode_t *dzp, const char *dirname, vattr_t *vap, znode_t **zpp,
 		    acl_ids.z_aclp->z_acl_bytes);
 	}
 
+	namelen = zfs_name_attr_len(zfsvfs, dzp, dirname);
 	dmu_tx_hold_sa_create(tx, acl_ids.z_aclp->z_acl_bytes +
-	    ZFS_SA_BASE_ATTR_SIZE);
+	    ZFS_SA_BASE_ATTR_SIZE + namelen);
 
 	error = dmu_tx_assign(tx, DMU_TX_WAIT);
 	if (error) {
@@ -1507,7 +1512,8 @@ zfs_mkdir(znode_t *dzp, const char *dirname, vattr_t *vap, znode_t **zpp,
 	/*
 	 * Create new node.
 	 */
-	zfs_mknode(dzp, vap, tx, cr, 0, &zp, &acl_ids);
+	zfs_mknode(dzp, vap, tx, cr, 0, &zp, &acl_ids,
+	    namelen != 0 ? dirname : NULL);
 
 	/*
 	 * Now put new name in parent dir.
@@ -3315,6 +3321,7 @@ zfs_do_rename_impl(vnode_t *sdvp, vnode_t **svpp, struct componentname *scnp,
 	znode_t		*tdzp, *sdzp, *tzp, *szp;
 	const char	*snm = scnp->cn_nameptr;
 	const char	*tnm = tcnp->cn_nameptr;
+	size_t		namelen;
 	int		error;
 
 	tdzp = VTOZ(tdvp);
@@ -3463,8 +3470,10 @@ zfs_do_rename_impl(vnode_t *sdvp, vnode_t **svpp, struct componentname *scnp,
 		vnevent_rename_dest_dir(tdvp, ct);
 	}
 
+	namelen = zfs_name_attr_len(zfsvfs, tdzp, tnm);
 	tx = dmu_tx_create(zfsvfs->z_os);
-	dmu_tx_hold_sa(tx, szp->z_sa_hdl, ZFS_SEQ_MAY_GROW(szp));
+	dmu_tx_hold_sa(tx, szp->z_sa_hdl,
+	    namelen != 0 || ZFS_SEQ_MAY_GROW(szp));
 	dmu_tx_hold_sa(tx, sdzp->z_sa_hdl, ZFS_SEQ_MAY_GROW(sdzp));
 	dmu_tx_hold_zap(tx, sdzp->z_id, FALSE, snm);
 	dmu_tx_hold_zap(tx, tdzp->z_id, TRUE, tnm);
@@ -3491,6 +3500,8 @@ zfs_do_rename_impl(vnode_t *sdvp, vnode_t **svpp, struct componentname *scnp,
 	if (error == 0) {
 		error = zfs_link_create(tdzp, tnm, szp, tx, ZRENAMING);
 		if (error == 0) {
+			if (namelen != 0)
+				zfs_name_attr_set(szp, tnm, namelen, tx);
 			szp->z_pflags |= ZFS_AV_MODIFIED;
 
 			error = sa_update(szp->z_sa_hdl, SA_ZPL_FLAGS(zfsvfs),
@@ -3613,6 +3624,7 @@ zfs_symlink(znode_t *dzp, const char *name, vattr_t *vap,
 	uint64_t	len = strlen(link);
 	int		error;
 	zfs_acl_ids_t	acl_ids;
+	size_t		namelen;
 	boolean_t	fuid_dirtied;
 	uint64_t	txtype = TX_SYMLINK;
 
@@ -3669,8 +3681,9 @@ zfs_symlink(znode_t *dzp, const char *name, vattr_t *vap,
 	fuid_dirtied = zfsvfs->z_fuid_dirty;
 	dmu_tx_hold_write(tx, DMU_NEW_OBJECT, 0, MAX(1, len));
 	dmu_tx_hold_zap(tx, dzp->z_id, TRUE, name);
+	namelen = zfs_name_attr_len(zfsvfs, dzp, name);
 	dmu_tx_hold_sa_create(tx, acl_ids.z_aclp->z_acl_bytes +
-	    ZFS_SA_BASE_ATTR_SIZE + len);
+	    ZFS_SA_BASE_ATTR_SIZE + len + namelen);
 	dmu_tx_hold_sa(tx, dzp->z_sa_hdl, ZFS_SEQ_MAY_GROW(dzp));
 	if (!zfsvfs->z_use_sa && acl_ids.z_aclp->z_acl_bytes > ZFS_ACE_SPACE) {
 		dmu_tx_hold_write(tx, DMU_NEW_OBJECT, 0,
@@ -3691,7 +3704,8 @@ zfs_symlink(znode_t *dzp, const char *name, vattr_t *vap,
 	 * Create a new object for the symlink.
 	 * for version 4 ZPL datasets the symlink will be an SA attribute
 	 */
-	zfs_mknode(dzp, vap, tx, cr, 0, &zp, &acl_ids);
+	zfs_mknode(dzp, vap, tx, cr, 0, &zp, &acl_ids,
+	    namelen != 0 ? name : NULL);
 
 	if (fuid_dirtied)
 		zfs_fuid_sync(zfsvfs, tx);
@@ -3796,6 +3810,7 @@ zfs_link(znode_t *tdzp, znode_t *szp, const char *name, cred_t *cr,
 	zfsvfs_t	*zfsvfs = tdzp->z_zfsvfs;
 	zilog_t		*zilog;
 	dmu_tx_t	*tx;
+	size_t		namelen;
 	int		error;
 	uint64_t	parent;
 	uid_t		owner;
@@ -3892,8 +3907,10 @@ zfs_link(znode_t *tdzp, znode_t *szp, const char *name, cred_t *cr,
 		return (error);
 	}
 
+	namelen = zfs_name_attr_len(zfsvfs, tdzp, name);
 	tx = dmu_tx_create(zfsvfs->z_os);
-	dmu_tx_hold_sa(tx, szp->z_sa_hdl, ZFS_SEQ_MAY_GROW(szp));
+	dmu_tx_hold_sa(tx, szp->z_sa_hdl,
+	    namelen != 0 || ZFS_SEQ_MAY_GROW(szp));
 	dmu_tx_hold_sa(tx, tdzp->z_sa_hdl, ZFS_SEQ_MAY_GROW(tdzp));
 	dmu_tx_hold_zap(tx, tdzp->z_id, TRUE, name);
 	zfs_sa_upgrade_txholds(tx, szp);
@@ -3909,6 +3926,8 @@ zfs_link(znode_t *tdzp, znode_t *szp, const char *name, cred_t *cr,
 
 	if (error == 0) {
 		uint64_t txtype = TX_LINK;
+		if (namelen != 0)
+			zfs_name_attr_set(szp, name, namelen, tx);
 		zfs_log_link(zilog, tx, txtype, tdzp, szp, name);
 	}
 

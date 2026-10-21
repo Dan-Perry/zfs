@@ -28,6 +28,8 @@ static dataset_kstat_values_t empty_dataset_kstats = {
 	{ "nread",	KSTAT_DATA_UINT64 },
 	{ "nunlinks",	KSTAT_DATA_UINT64 },
 	{ "nunlinked",	KSTAT_DATA_UINT64 },
+	{ "namelookups",	KSTAT_DATA_UINT64 },
+	{ "namelookup_misses",	KSTAT_DATA_UINT64 },
 	{
 	{ "zil_commit_count",			KSTAT_DATA_UINT64 },
 	{ "zil_commit_writer_count",		KSTAT_DATA_UINT64 },
@@ -77,6 +79,10 @@ dataset_kstats_update(kstat_t *ksp, int rw)
 	    wmsum_value(&dk->dk_sums.dss_nunlinks);
 	dkv->dkv_nunlinked.value.ui64 =
 	    wmsum_value(&dk->dk_sums.dss_nunlinked);
+	dkv->dkv_namelookups.value.ui64 =
+	    wmsum_value(&dk->dk_sums.dss_namelookups);
+	dkv->dkv_namelookup_misses.value.ui64 =
+	    wmsum_value(&dk->dk_sums.dss_namelookup_misses);
 
 	zil_kstat_values_update(&dkv->dkv_zil_stats, &dk->dk_zil_sums);
 
@@ -166,6 +172,8 @@ dataset_kstats_create(dataset_kstats_t *dk, objset_t *objset)
 	wmsum_init(&dk->dk_sums.dss_nread, 0);
 	wmsum_init(&dk->dk_sums.dss_nunlinks, 0);
 	wmsum_init(&dk->dk_sums.dss_nunlinked, 0);
+	wmsum_init(&dk->dk_sums.dss_namelookups, 0);
+	wmsum_init(&dk->dk_sums.dss_namelookup_misses, 0);
 	zil_sums_init(&dk->dk_zil_sums);
 
 	dk->dk_kstats = kstat;
@@ -192,6 +200,8 @@ dataset_kstats_destroy(dataset_kstats_t *dk)
 	wmsum_fini(&dk->dk_sums.dss_nread);
 	wmsum_fini(&dk->dk_sums.dss_nunlinks);
 	wmsum_fini(&dk->dk_sums.dss_nunlinked);
+	wmsum_fini(&dk->dk_sums.dss_namelookups);
+	wmsum_fini(&dk->dk_sums.dss_namelookup_misses);
 	zil_sums_fini(&dk->dk_zil_sums);
 }
 
@@ -250,4 +260,22 @@ dataset_kstats_update_nunlinked_kstat(dataset_kstats_t *dk, int64_t delta)
 		return;
 
 	wmsum_add(&dk->dk_sums.dss_nunlinked, delta);
+}
+
+void
+dataset_kstats_update_namelookup_kstat(dataset_kstats_t *dk, int64_t delta)
+{
+	if (dk->dk_kstats == NULL)
+		return;
+
+	wmsum_add(&dk->dk_sums.dss_namelookups, delta);
+}
+
+void
+dataset_kstats_update_namelookup_miss_kstat(dataset_kstats_t *dk, int64_t delta)
+{
+	if (dk->dk_kstats == NULL)
+		return;
+
+	wmsum_add(&dk->dk_sums.dss_namelookup_misses, delta);
 }

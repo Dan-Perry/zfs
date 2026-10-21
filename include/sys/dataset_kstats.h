@@ -30,6 +30,8 @@ typedef struct dataset_sum_stats_t {
 	wmsum_t dss_nread;
 	wmsum_t dss_nunlinks;
 	wmsum_t dss_nunlinked;
+	wmsum_t dss_namelookups;
+	wmsum_t dss_namelookup_misses;
 } dataset_sum_stats_t;
 
 typedef struct dataset_kstat_values {
@@ -48,6 +50,13 @@ typedef struct dataset_kstat_values {
 	 * entry is removed from the unlinked set
 	 */
 	kstat_named_t dkv_nunlinked;
+	/*
+	 * namelookups counts lookups of an object's name in its parent.
+	 * namelookup_misses counts those that had to scan the directory
+	 * because no valid ZPL_NAME was cached.
+	 */
+	kstat_named_t dkv_namelookups;
+	kstat_named_t dkv_namelookup_misses;
 	/*
 	 * Per dataset zil kstats
 	 */
@@ -69,5 +78,6 @@ void dataset_kstats_update_read_kstats(dataset_kstats_t *, int64_t);
 
 void dataset_kstats_update_nunlinks_kstat(dataset_kstats_t *, int64_t);
 void dataset_kstats_update_nunlinked_kstat(dataset_kstats_t *, int64_t);
-
+void dataset_kstats_update_namelookup_kstat(dataset_kstats_t *, int64_t);
+void dataset_kstats_update_namelookup_miss_kstat(dataset_kstats_t *, int64_t);
 #endif /* _SYS_DATASET_KSTATS_H */

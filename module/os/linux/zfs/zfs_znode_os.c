@@ -667,13 +667,15 @@ static zfs_acl_phys_t acl_phys;
  *			  IS_TMPFILE	- new object is of O_TMPFILE
  *			  IS_XATTR	- new object is an attribute
  *		acl_ids	- ACL related attributes
+ *		name	- directory entry name to store as ZPL_NAME,
+ *			  or NULL to store none
  *
  *	OUT:	zpp	- allocated znode (set to dzp if IS_ROOT_NODE)
  *
  */
 void
 zfs_mknode(znode_t *dzp, vattr_t *vap, dmu_tx_t *tx, cred_t *cr,
-    uint_t flag, znode_t **zpp, zfs_acl_ids_t *acl_ids)
+    uint_t flag, znode_t **zpp, zfs_acl_ids_t *acl_ids, const char *name)
 {
 	uint64_t	crtime[2], atime[2], mtime[2], ctime[2];
 	uint64_t	mode, size, links, parent, pflags;
@@ -895,6 +897,10 @@ zfs_mknode(znode_t *dzp, vattr_t *vap, dmu_tx_t *tx, cred_t *cr,
 	    (S_ISBLK(vap->va_mode) || S_ISCHR(vap->va_mode))) {
 		SA_ADD_BULK_ATTR(sa_attrs, cnt, SA_ZPL_RDEV(zfsvfs),
 		    NULL, &rdev, 8);
+	}
+	if (obj_type == DMU_OT_SA && name != NULL) {
+		SA_ADD_BULK_ATTR(sa_attrs, cnt, SA_ZPL_NAME(zfsvfs),
+		    NULL, (void *)name, strlen(name) + 1);
 	}
 	if (obj_type == DMU_OT_ZNODE) {
 		SA_ADD_BULK_ATTR(sa_attrs, cnt, SA_ZPL_FLAGS(zfsvfs),
@@ -2001,7 +2007,7 @@ zfs_create_fs(objset_t *os, cred_t *cr, nvlist_t *zplprops, dmu_tx_t *tx)
 
 	VERIFY0(zfs_acl_ids_create(rootzp, IS_ROOT_NODE, &vattr,
 	    cr, NULL, &acl_ids, zfs_init_idmap));
-	zfs_mknode(rootzp, &vattr, tx, cr, IS_ROOT_NODE, &zp, &acl_ids);
+	zfs_mknode(rootzp, &vattr, tx, cr, IS_ROOT_NODE, &zp, &acl_ids, NULL);
 	ASSERT3P(zp, ==, rootzp);
 	error = zap_add(os, moid, ZFS_ROOT_OBJ, 8, 1, &rootzp->z_id, tx);
 	ASSERT0(error);
